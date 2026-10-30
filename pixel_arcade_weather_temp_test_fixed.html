@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>픽셀 아케이드 벽돌깨기 - 수정본</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:18px;background:#0b1020;color:#e5f4ff;font-family:monospace}
+.game{max-width:520px;margin:auto;padding:14px;background:#101525;border:2px solid #46577d;border-radius:10px}
+h1{text-align:center;font-size:22px;letter-spacing:2px;color:#72f6d0;margin:4px 0}
+.subtitle{text-align:center;font-size:11px;color:#a7b9df;margin:5px 0 12px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.stat{background:#1b243a;padding:7px 3px;border:1px solid #354565;text-align:center;font-size:11px}.stat b{display:block;color:#72f6d0;font-size:16px;margin-top:3px}
+canvas{display:block;width:100%;height:auto;aspect-ratio:4/5;background:#090f20;border:2px solid #536b9a;image-rendering:pixelated;touch-action:none;margin:10px auto}
+.controls{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+button{font-family:monospace;font-weight:bold;background:#263858;color:#e5f4ff;border:2px solid #718bb8;padding:9px 12px;border-radius:4px;cursor:pointer}
+button:active{background:#47648f}
+.message{text-align:center;min-height:30px;color:#ffe77a;font-size:12px;margin:5px 0}
+.guide{margin-top:12px;padding:9px;background:#1b243a;border:1px solid #354565;font-size:11px;line-height:1.9}
+</style>
+</head>
+<body>
+<div class="game">
+<h1>★ PIXEL BREAKER ★</h1>
+<div class="subtitle">RETRO ARCADE · POWER-UP EDITION</div>
+<div class="stats" style="grid-template-columns:repeat(4,1fr)"><div class="stat">SCORE<b id="score">0</b></div><div class="stat">BEST<b id="best">0</b></div><div class="stat">LIVES<b id="lives">3</b></div><div class="stat">BALL SPEED<b id="speed">1.00x</b></div></div>
+<div class="guide" style="margin-top:8px">
+<div style="color:#72f6d0;font-weight:bold">🌦 WEATHER SPEED TEST</div>
+<div class="controls" style="justify-content:flex-start;align-items:center">
+<label for="tempInput">테스트 기온</label>
+<input id="tempInput" type="number" value="13" min="-50" max="60" step="1" style="width:78px;padding:8px;background:#0b1020;color:#fff;border:2px solid #718bb8;border-radius:4px;font-family:monospace">
+<span>°C</span><button id="applyTempBtn" type="button">기온 적용</button>
+</div>
+<div id="weatherStatus" style="margin-top:6px;color:#ffe77a">현재 13°C · 기본 속도 1.00×</div>
+<div style="font-size:11px;color:#a7b9df;margin-top:5px">25°C 이상: 빠름 1.35× · 10~24°C: 기본 1.00× · 10°C 미만: 느림 0.75×</div>
+</div>
+<canvas id="gameCanvas" width="400" height="500" aria-label="픽셀 아케이드 벽돌깨기 게임"></canvas>
+<div id="message" class="message">START를 눌러 게임을 시작해!</div>
+<div class="controls"><button id="startBtn">▶ START / 재시작</button><button id="pauseBtn">Ⅱ 일시정지</button></div>
+<div class="controls"><button id="leftBtn" style="width:75px;font-size:18px">◀</button><button id="rightBtn" style="width:75px;font-size:18px">▶</button></div>
+<div class="guide">
+<div style="color:#72f6d0;font-weight:bold">★ POWER-UP GUIDE</div>
+🔵 MULTI BALL — 공이 3개로 분열<br>
+🟢 LONG PADDLE — 막대가 12초간 길어져<br>
+🔴 SHORT PADDLE — 막대가 6초간 짧아져<br>
+🟡 BALL POWER — 공이 황금빛으로 빛나며 8초간 관통 강화<br>
+⬜ 회색 벽돌 — 두 번 맞아야 파괴돼<br>
+공이 튕기거나 벽돌이 깨지거나 아이템을 먹을 때 효과음이 나와.<br>벽돌 파괴 시 작은 픽셀 파편 이펙트가 나타나.<br>공은 최대 9개까지 생성돼. 공이 9개면 멀티볼 아이템은 더 이상 나오지 않아.<br>기본 막대 길이를 늘렸고, 길이 증가 아이템은 12초간 더 길게 해 줘. 일정 확률로 막대가 6초간 짧아지는 아이템도 나와.<br>내려오는 벽돌 행은 최대 4칸까지 빈칸이 생길 수 있고, 벽돌을 전부 없애면 +250 보너스 점수와 축하 이펙트가 나와.<br>벽돌을 모두 깨면 새 벽돌 5줄이 생성돼. 벽돌 생성 간격은 10초부터 천천히 짧아져(최소 4초).<br>스테이지 클리어 없이 계속 도전하며 최고기록은 브라우저에 저장돼.
+</div>
+</div>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const canvas = $('gameCanvas'), ctx = canvas.getContext('2d');
+const W=400,H=500, PADDLE_BASE=86, PADDLE_WIDE=132, PADDLE_SHORT=48, MAX_BALLS=9, colors=['#ff5577','#ff9e45','#ffe45e','#69efad','#55d9ff','#aa8cff'];
+let paddle,balls,bricks,drops,particles,score,best=0,lives,running=false,paused=false,over=false,won=false;
+let keys={},last=0,rowTimer=0,speedElapsed=0,speed=1,wideTimer=0,shortTimer=0,pierceTimer=0,raf=0,floatingTexts=[];
+let audioCtx=null, lastBounceSound=0;
+let testTemp=13, weatherMultiplier=1;
+try{best=Number(localStorage.getItem('pixelBreakerBest')||0)||0;}catch(e){}
+
+function makeRow(y,withGaps=false){
+  const a=[],gaps=new Set();
+  if(withGaps && Math.random()<.78){
+    const n=1+Math.floor(Math.random()*4); // 1~4개의 빈칸, 최대 4개
+    while(gaps.size<n) gaps.add(Math.floor(Math.random()*8));
+  }
+  for(let col=0;col<8;col++){
+    if(gaps.has(col)) continue;
+    const hp=Math.random()<.09?2:1;
+    a.push({x:col*50,y,w:50,h:18,hp,maxHp:hp,color:hp===2?'#9298a3':colors[Math.floor(Math.random()*colors.length)],on:true});
+  }
+  return a;
+}
+function newBall(x,y,vx,vy){return {x,y,vx,vy,r:5,pierceHits:0};}
+function resetBall(){balls=[newBall(W/2,H-70,2.8,-4)];speed=1;speedElapsed=0;updateStats();}
+function updateStats(){
+  $('score').textContent=score;$('best').textContent=best;$('lives').textContent=lives;$('speed').textContent=speed.toFixed(2)+'x';
+  if(score>best){best=score;$('best').textContent=best;try{localStorage.setItem('pixelBreakerBest',String(best));}catch(e){}}
+}
+function audio(){
+  if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(AC)audioCtx=new AC();}
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+  return audioCtx;
+}
+function tone(freq,duration,type='square',volume=.035,endFreq=null){
+  const ac=audio();if(!ac)return;
+  const osc=ac.createOscillator(),gain=ac.createGain(),now=ac.currentTime;
+  osc.type=type;osc.frequency.setValueAtTime(freq,now);
+  if(endFreq)osc.frequency.exponentialRampToValueAtTime(Math.max(1,endFreq),now+duration);
+  gain.gain.setValueAtTime(volume,now);gain.gain.exponentialRampToValueAtTime(.001,now+duration);
+  osc.connect(gain);gain.connect(ac.destination);osc.start(now);osc.stop(now+duration);
+}
+function bounceSound(){
+  const now=performance.now();if(now-lastBounceSound<45)return;lastBounceSound=now;
+  tone(250,.045,'square',.018,175);
+}
+function breakSound(){
+  tone(620,.055,'square',.026,300);
+  setTimeout(()=>tone(240,.05,'triangle',.018,130),22);
+}
+function itemSound(){tone(520,.09,'sine',.035,780);setTimeout(()=>tone(780,.12,'sine',.03,1040),65);}
+function burst(x,y,color,count=12){
+  // 작은 픽셀 파편이 사방으로 튀고 빠르게 사라지는 벽돌 파괴 이펙트
+  for(let i=0;i<count;i++){
+    const a=Math.random()*Math.PI*2,s=1.0+Math.random()*3.2;
+    particles.push({
+      x:x+(Math.random()-0.5)*8,y:y+(Math.random()-0.5)*5,
+      vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+      life:14+Math.random()*13,max:27,color,
+      size:2+Math.random()*3
+    });
+  }
+}
+function refillBricks(){
+  // 벽돌을 모두 없애면 보너스 점수와 축하 이펙트를 준 뒤 새 줄을 생성
+  const bonus=250;
+  score+=bonus;
+  floatingTexts.push({x:W/2,y:190,text:'+'+bonus+' BONUS!',life:100,max:100,color:'#ffe77a'});
+  burst(W/2,180,'#ffe77a',44);
+  burst(W/2,130,'#72f6d0',28);
+  tone(440,.12,'triangle',.04,660);
+  setTimeout(()=>tone(660,.15,'sine',.035,990),80);
+  const rows=5;
+  for(let r=0;r<rows;r++)bricks.push(...makeRow(r*18,true));
+  rowTimer=0;
+  $('message').textContent='벽돌 전부 파괴! 보너스 +'+bonus+'점! 새 벽돌 5줄 등장!';
+}
+function init(){
+  cancelAnimationFrame(raf);score=0;lives=3;rowTimer=0;speedElapsed=0;speed=1;wideTimer=0;shortTimer=0;pierceTimer=0;
+  running=false;paused=false;over=false;won=false;keys={};particles=[];floatingTexts=[];
+  paddle={x:W/2-PADDLE_BASE/2,y:H-35,w:PADDLE_BASE,h:9};bricks=[];drops=[];
+  for(let r=0;r<6;r++)bricks.push(...makeRow(r*18));
+  resetBall();updateStats();$('message').textContent='START를 눌러 게임을 시작해!';
+  $('pauseBtn').textContent='Ⅱ 일시정지';draw();
+}
+function start(){
+  audio();
+  if(over||won)init();
+  running=true;paused=false;last=0;$('message').textContent='아이템을 잡고 특수 벽돌을 깨 봐!';
+  $('pauseBtn').textContent='Ⅱ 일시정지';cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+}
+function end(win,msg){
+  running=false;over=!win;won=win;
+  $('message').textContent=msg||(win?'★ STAGE CLEAR!':'GAME OVER — START로 재도전!');draw();
+}
+function miss(){
+  lives--;resetBall();paddle.x=W/2-paddle.w/2;wideTimer=0;shortTimer=0;pierceTimer=0;paddle.w=PADDLE_BASE;updateStats();
+  if(lives<=0){end(false);return;}
+  $('message').textContent='공을 놓쳤어! 속도가 초기화됐어.';
+}
+function loop(t){
+  if(!running)return;if(!last)last=t;
+  const dt=Math.min((t-last)/16.667,2);last=t;
+  if(!paused)update(dt);draw();if(running)raf=requestAnimationFrame(loop);
+}
+function splitBalls(){
+  const old=balls.slice();
+  for(const b of old){
+    for(const a of [-.38,.38]){
+      if(balls.length>=MAX_BALLS)break;
+      const base=Math.atan2(b.vy,b.vx),m=Math.hypot(b.vx,b.vy),ang=base+a;
+      balls.push(newBall(b.x,b.y,Math.cos(ang)*m,Math.sin(ang)*m));
+    }
+    if(balls.length>=MAX_BALLS)break;
+  }
+  $('message').textContent='🔵 MULTI BALL! 공은 최대 9개까지!';
+}
+function catchDrop(d){
+  itemSound();burst(d.x,d.y,d.type==='multi'?'#55d9ff':d.type==='wide'?'#69efad':d.type==='short'?'#ff6689':'#ffe45e',14);
+  if(d.type==='multi')splitBalls();
+  else if(d.type==='wide'){
+    shortTimer=0;wideTimer=12000;paddle.w=PADDLE_WIDE;paddle.x=Math.max(0,Math.min(W-paddle.w,paddle.x));
+    $('message').textContent='🟢 LONG PADDLE! 12초간 막대가 길어져!';
+  }else if(d.type==='short'){
+    wideTimer=0;shortTimer=6000;paddle.w=PADDLE_SHORT;paddle.x=Math.max(0,Math.min(W-paddle.w,paddle.x));
+    $('message').textContent='🔴 SHORT PADDLE! 6초간 막대가 짧아져!';
+  }else{
+    pierceTimer=8000;for(const b of balls)b.pierceHits=0;
+    $('message').textContent='🟡 BALL POWER! 공이 황금빛으로 빛나며 8초간 관통 강화!';
+  }
+}
+function update(dt){
+  const ms=dt*16.667;rowTimer+=ms;speedElapsed+=ms;
+  // Smooth linear acceleration: +0.012x per second, capped at 2.2x.
+  speed=Math.min(2.2,(1+speedElapsed*0.000012)*weatherMultiplier);
+  if(keys.ArrowLeft||keys.a)paddle.x-=6*dt;
+  if(keys.ArrowRight||keys.d)paddle.x+=6*dt;
+  paddle.x=Math.max(0,Math.min(W-paddle.w,paddle.x));
+  if(wideTimer>0){
+    wideTimer-=ms;
+    if(wideTimer<=0){paddle.w=PADDLE_BASE;paddle.x=Math.min(paddle.x,W-paddle.w);$('message').textContent='막대 길이가 기본으로 돌아왔어.';}
+  }
+  if(shortTimer>0){
+    shortTimer-=ms;
+    if(shortTimer<=0){paddle.w=PADDLE_BASE;paddle.x=Math.min(paddle.x,W-paddle.w);$('message').textContent='짧아진 막대가 기본 길이로 돌아왔어.';}
+  }
+  if(pierceTimer>0){
+    pierceTimer-=ms;
+    if(pierceTimer<=0){for(const b of balls)b.pierceHits=0;$('message').textContent='관통 강화 효과가 끝났어.';}
+  }
+  // 벽돌 생성 간격은 천천히 짧아져. 10초에서 시작해 최소 4초까지 감소.
+  // 공 속도 증가와 별개로 완만하게 진행돼.
+  const rowInterval=Math.max(4000,10000-speedElapsed*0.02);
+  while(rowTimer>=rowInterval){
+    rowTimer-=rowInterval;
+    for(const b of bricks)if(b.on)b.y+=18;
+    bricks.push(...makeRow(0,true));
+    $('message').textContent='새 벽돌 행 등장! 생성 간격 '+(rowInterval/1000).toFixed(1)+'초';
+  }
+  for(const p of particles){
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=.035*dt;p.life-=dt;
+  }
+  particles=particles.filter(p=>p.life>0);
+  for(const f of floatingTexts){f.y-=0.35*dt;f.life-=dt;}
+  floatingTexts=floatingTexts.filter(f=>f.life>0);
+  for(const d of drops){
+    d.y+=2.2*dt;
+    if(d.y+8>=paddle.y&&d.y<=paddle.y+paddle.h&&d.x+8>=paddle.x&&d.x-8<=paddle.x+paddle.w){catchDrop(d);d.got=true;}
+    else if(d.y>H)d.got=true;
+  }
+  drops=drops.filter(d=>!d.got);
+  for(const b of balls){
+    const ox=b.x,oy=b.y;b.x+=b.vx*speed*dt;b.y+=b.vy*speed*dt;
+    if(b.x<b.r){b.x=b.r;b.vx=Math.abs(b.vx);bounceSound();}
+    if(b.x>W-b.r){b.x=W-b.r;b.vx=-Math.abs(b.vx);bounceSound();}
+    if(b.y<b.r){b.y=b.r;b.vy=Math.abs(b.vy);bounceSound();}
+    if(b.vy>0&&b.y+b.r>=paddle.y&&b.y-b.r<=paddle.y+paddle.h&&b.x>=paddle.x&&b.x<=paddle.x+paddle.w){
+      b.y=paddle.y-b.r;const hit=(b.x-(paddle.x+paddle.w/2))/(paddle.w/2);
+      b.vx=hit*4.5;b.vy=-Math.sqrt(Math.max(10,25-b.vx*b.vx*.45));b.pierceHits=0;bounceSound();
+    }
+    for(const br of bricks){
+      if(!br.on)continue;
+      const nx=Math.max(br.x,Math.min(b.x,br.x+br.w)),ny=Math.max(br.y,Math.min(b.y,br.y+br.h));
+      if((b.x-nx)**2+(b.y-ny)**2<=b.r*b.r){
+        br.hp--;
+        if(br.hp<=0){
+          br.on=false;score+=10;burst(br.x+br.w/2,br.y+br.h/2,br.color,11);breakSound();
+          if(Math.random()<.28){
+            const roll=Math.random();
+            // 공이 이미 9개 이상이면 공을 늘리는 아이템은 생성하지 않음
+            const type=balls.length>=MAX_BALLS
+              ? (roll<.42?'wide':roll<.72?'short':'pierce')
+              : (roll<.28?'multi':roll<.53?'wide':roll<.76?'short':'pierce');
+            drops.push({x:br.x+br.w/2,y:br.y+br.h/2,type,got:false});
+          }
+        }else{score+=3;br.color='#9298a3';burst(b.x,b.y,'#e4e7ec',4);tone(210,.035,'square',.012,160);}
+        const bottom=oy+b.r<=br.y,top=oy-b.r>=br.y+br.h,left=ox+b.r<=br.x,right=ox-b.r>=br.x+br.w;
+        let shouldBounce=true;
+        if(pierceTimer>0){b.pierceHits++;if(b.pierceHits%2===1)shouldBounce=false;else b.pierceHits=0;}
+        if(shouldBounce){if(bottom||top)b.vy*=-1;else if(left||right)b.vx*=-1;else b.vy*=-1;bounceSound();}
+        if(bottom)b.y=br.y-b.r-.2;else if(top)b.y=br.y+br.h+b.r+.2;else if(left)b.x=br.x-b.r-.2;else if(right)b.x=br.x+br.w+b.r+.2;
+        break;
+      }
+    }
+  }
+  balls=balls.filter(b=>b.y<H+10);
+  if(balls.length===0){miss();return;}
+  if(bricks.some(b=>b.on&&b.y+b.h>=paddle.y)){end(false,'벽돌이 패들까지 내려왔어! START로 재도전');return;}
+  if(!bricks.some(b=>b.on))refillBricks();
+  updateStats();
+}
+function rect(x,y,w,h,col){ctx.fillStyle=col;ctx.fillRect(Math.round(x),Math.round(y),w,h);}
+function draw(){
+  ctx.clearRect(0,0,W,H);rect(0,0,W,H,'#090f20');
+  for(let i=0;i<42;i++)rect((i*73+19)%W,(i*47+11)%H,2,2,i%4===0?'#42557c':'#1e2a49');
+  ctx.strokeStyle='#17213a';
+  for(let x=20;x<W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=20;y<H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  for(const b of bricks){
+    if(!b.on)continue;
+    rect(b.x,b.y,b.w,b.h,b.color);rect(b.x+2,b.y+2,b.w-4,3,'rgba(255,255,255,.5)');
+    rect(b.x+3,b.y+b.h-4,b.w-6,2,'rgba(0,0,0,.3)');
+    if(b.hp===2){rect(b.x+7,b.y+7,5,5,'#e4e7ec');rect(b.x+16,b.y+7,5,5,'#e4e7ec');rect(b.x+b.w-12,b.y+7,5,5,'#e4e7ec');}
+  }
+  for(const p of particles){
+    ctx.globalAlpha=Math.max(0,p.life/p.max);rect(p.x,p.y,p.size,p.size,p.color);
+  }
+  ctx.globalAlpha=1;
+  for(const f of floatingTexts){
+    ctx.globalAlpha=Math.max(0,Math.min(1,f.life/22));
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.font='bold 22px monospace';
+    ctx.lineWidth=4;ctx.strokeStyle='#17203d';ctx.strokeText(f.text,f.x,f.y);
+    ctx.fillStyle=f.color;ctx.fillText(f.text,f.x,f.y);
+  }
+  ctx.globalAlpha=1;ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  for(const d of drops){
+    const col=d.type==='multi'?'#55d9ff':d.type==='wide'?'#69efad':d.type==='short'?'#ff6689':'#ffe45e',sym=d.type==='multi'?'3':d.type==='wide'?'↔':d.type==='short'?'↔↓':'✦';
+    rect(d.x-8,d.y-8,16,16,'#e5f4ff');rect(d.x-6,d.y-6,12,12,col);
+    ctx.fillStyle='#101525';ctx.font='bold 10px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(sym,d.x,d.y);ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  }
+  rect(paddle.x-2,paddle.y-2,paddle.w+4,paddle.h+4,'#17203d');rect(paddle.x,paddle.y,paddle.w,paddle.h,'#72f6d0');rect(paddle.x+4,paddle.y+2,paddle.w-8,2,'#e0fff7');
+  for(const b of balls){
+    if(pierceTimer>0){
+      // 간결한 강화 표시: 얇은 황금 테두리와 밝은 중심만 표시
+      ctx.strokeStyle='#ffcf4a';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(b.x,b.y,7,0,Math.PI*2);ctx.stroke();
+      rect(b.x-5,b.y-5,10,10,'#ffcf4a');rect(b.x-2,b.y-2,4,4,'#fffde7');
+    }else{rect(b.x-5,b.y-5,10,10,'#fff4a6');rect(b.x-3,b.y-3,6,6,'#fff');}
+  }
+  if(paused&&running){rect(0,0,W,H,'rgba(5,8,20,.72)');ctx.fillStyle='#72f6d0';ctx.font='bold 28px monospace';ctx.textAlign='center';ctx.fillText('PAUSED',W/2,H/2);ctx.textAlign='left';}
+  if(!running&&!over&&!won){rect(0,0,W,H,'rgba(5,8,20,.35)');ctx.fillStyle='#ffe77a';ctx.font='bold 14px monospace';ctx.textAlign='center';ctx.fillText('PRESS START',W/2,H/2);ctx.textAlign='left';}
+  if(over){rect(0,0,W,H,'rgba(5,8,20,.72)');ctx.textAlign='center';ctx.fillStyle='#ff6689';ctx.font='bold 25px monospace';ctx.fillText('GAME OVER',W/2,H/2);ctx.fillStyle='#fff';ctx.font='13px monospace';ctx.fillText('SCORE '+score+'  BEST '+best,W/2,H/2+27);ctx.textAlign='left';}
+}
+function pointer(e){const r=canvas.getBoundingClientRect();paddle.x=Math.max(0,Math.min(W-paddle.w,(e.clientX-r.left)*W/r.width-paddle.w/2));if(!running)draw();}
+canvas.addEventListener('pointermove',pointer);
+canvas.addEventListener('pointerdown',e=>{pointer(e);if(!running&&!over&&!won)start();});
+window.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key===' '&&running)toggle();});
+window.addEventListener('keyup',e=>keys[e.key]=false);
+function toggle(){
+  if(!running)return;paused=!paused;$('pauseBtn').textContent=paused?'▶ 계속':'Ⅱ 일시정지';
+  if(!paused){last=0;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);}draw();
+}
+function applyTemperature(){
+  const input=$('tempInput');
+  const value=Number(input.value);
+  if(input.value.trim()==='' || !Number.isFinite(value)){
+    $('weatherStatus').textContent='기온을 숫자로 입력해 줘.';return;
+  }
+  testTemp=Math.max(-50,Math.min(60,value));input.value=String(testTemp);
+  weatherMultiplier=testTemp>=25?1.35:(testTemp<10?0.75:1.0);
+  const mode=testTemp>=25?'빠른 모드':(testTemp<10?'느린 모드':'기본 모드');
+  $('weatherStatus').textContent=`현재 ${testTemp}°C · ${mode} ${weatherMultiplier.toFixed(2)}×`;
+  speed=Math.min(2.2,(1+speedElapsed*0.000012)*weatherMultiplier);
+  updateStats();draw();
+}
+$('applyTempBtn').addEventListener('click',applyTemperature);
+$('tempInput').addEventListener('keydown',e=>{if(e.key==='Enter')applyTemperature();});
+$('startBtn').addEventListener('click',start);$('pauseBtn').addEventListener('click',toggle);
+function hold(id,key){
+  const el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();keys[key]=true;});
+  for(const ev of ['pointerup','pointercancel','pointerleave'])el.addEventListener(ev,()=>keys[key]=false);
+}
+hold('leftBtn','ArrowLeft');hold('rightBtn','ArrowRight');init();applyTemperature();
+})();
+</script>
+</body>
+</html>
