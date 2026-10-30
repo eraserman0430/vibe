@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixel Swordsman - Slime Battle</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#132b2a;color:#eef6e9;font-family:system-ui,sans-serif;display:flex;justify-content:center;padding:18px}
+.wrap{width:min(100%,1000px)}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px}
+h1{font-size:17px;margin:0;letter-spacing:1px}button{background:#213e3a;color:#f4f7e9;border:1px solid #79988a;border-radius:8px;padding:8px 13px;cursor:pointer;font-weight:700}
+.stage{position:relative;border:2px solid #6e9382;border-radius:12px;overflow:hidden;background:#86c5d6}
+canvas{display:block;width:100%;height:auto;image-rendering:pixelated;touch-action:none}
+.hud{position:absolute;left:12px;right:12px;top:10px;display:flex;align-items:center;gap:8px;pointer-events:none;text-shadow:1px 2px 2px #172a24;font-size:12px;font-weight:800}
+.bar{width:140px;height:13px;background:#25372f;border:1px solid #fff;padding:2px;border-radius:3px}.fill{height:100%;background:#e83b42;width:100%}
+.enemy{margin-left:auto}.status{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:#172d2bd9;padding:5px 12px;border-radius:5px;font-size:12px;font-weight:700;white-space:nowrap}
+.info{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:10px 0;font-size:12px;color:#d0dfd1}
+.combo{border:1px solid #496c60;border-radius:9px;padding:12px;margin-top:10px}.moves{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;text-align:center}.move{border:1px solid #496c60;border-radius:7px;padding:9px 4px;font-size:12px}.move b{display:block;font-size:14px;margin-bottom:4px}.move.active{background:#d8edfa;color:#193d4a}
+.touch{display:none;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:12px}.touch button{min-width:48px;padding:12px}
+@media(max-width:650px){body{padding:8px}.touch{display:flex}.moves{grid-template-columns:repeat(3,1fr)}.bar{width:95px}.hud{font-size:10px;gap:5px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><h1>⚔ PIXEL SWORDSMAN · SLIME BATTLE</h1><button id="reset">↻ 다시 시작</button></header>
+<div class="stage">
+<canvas id="game" width="800" height="450"></canvas>
+<div class="hud"><span>PLAYER HP</span><div class="bar"><div id="hpfill" class="fill"></div></div><span id="hptext">100/100</span><span class="enemy" id="enemytext">SLIME 100/100</span></div>
+<div class="status" id="status">SLIME BATTLE</div>
+</div>
+<div class="info"><span>← → 이동　 C 점프　 X 검 공격　 ↑ 위 보기　 ↓ 앉기</span><span>Z 차징 강공격　 ↓ + Z 돌진 베기 (쿨타임 0.5초)</span></div>
+<div class="combo"><div style="font-weight:800;font-size:12px;margin-bottom:9px">SWORD SKILLS</div>
+<div class="moves">
+<div class="move" id="m1"><b>X · 1타</b>아래 베기<br>10 DMG</div>
+<div class="move" id="m2"><b>X · 2타</b>위 베기<br>10 DMG</div>
+<div class="move" id="m3"><b>X · 3타</b>옆 크게 베기<br>20 DMG</div>
+<div class="move" id="mz"><b>Z</b>1초 차징 강공격<br>30 DMG</div>
+<div class="move" id="md"><b>↓ + Z</b>즉발 돌진 베기<br>20 DMG · 0.5초 쿨</div>
+</div></div>
+<div class="touch">
+<button data-key="ArrowLeft">←</button><button data-key="ArrowRight">→</button><button data-key="ArrowUp">↑</button><button data-key="ArrowDown">↓</button><button data-action="jump">점프</button><button data-action="attack">검 공격</button><button data-action="charge">Z 차징</button>
+</div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),c=canvas.getContext('2d'),W=800,H=450,G=390;
+const $=id=>document.getElementById(id);
+let p,slime,keys={},attack=null,combo=0,comboTimer=0,cool=0,charge=null,dashCool=0;
+let particles=[],ghosts=[],goldText=[],clock=0,last=0,gameOver=false;
+const platforms=[{x:85,y:305,w:155,h:14},{x:560,y:305,w:155,h:14}];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function rect(x,y,w,h,col){c.fillStyle=col;c.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h))}
+function line(x,y,X,Y,col,w=3){c.strokeStyle=col;c.lineWidth=w;c.lineCap='square';c.beginPath();c.moveTo(x,y);c.lineTo(X,Y);c.stroke()}
+function poly(a,col){c.fillStyle=col;c.beginPath();c.moveTo(...a[0]);for(let i=1;i<a.length;i++)c.lineTo(...a[i]);c.closePath();c.fill()}
+function background(){
+let g=c.createLinearGradient(0,0,0,G);g.addColorStop(0,'#79c5e0');g.addColorStop(1,'#d4dcae');c.fillStyle=g;c.fillRect(0,0,W,H);
+// Clouds and open mountain view
+for(let i=0;i<3;i++){let x=80+i*285,y=58+i%2*32;rect(x,y,92,12,'#dceef0');rect(x+20,y-12,55,16,'#eff6ed')}
+poly([[0,270],[115,160],[235,270],[365,145],[500,270],[650,155],[800,270],[800,G],[0,G]],'#86aaa0');
+poly([[0,315],[145,225],[280,310],[430,220],[570,305],[700,220],[800,300],[800,G],[0,G]],'#678d72');
+// Tree trunks now anchored at ground; only two framing trees, with crowns connected to trunks.
+for(const x of [5,735]){
+rect(x+32,105,35,G-105,'#624b36');rect(x+42,112,9,G-112,'#806044');
+line(x+48,210,x+5,143,'#624b36',17);line(x+54,185,x+104,120,'#624b36',15);
+rect(x,62,105,62,'#376b46');rect(x+15,32,92,57,'#477d4d');rect(x+7,105,102,30,'#47794a');
+}
+// distant tree line begins at the ground, never floating
+for(let i=0;i<7;i++){let x=55+i*112;rect(x+25,260,13,110,'#65704a');rect(x,228,65,48,'#60885b');rect(x+9,205,52,40,'#70996a')}
+}
+function terrain(){
+rect(0,G,W,H-G,'#514936');rect(0,G,W,8,'#92b967');rect(0,G+8,W,5,'#496b40');
+for(let x=0;x<W;x+=25){rect(x,G+20,12,5,'#756044');rect(x+11,G+39,8,5,'#69543d');rect(x+3,G+55,6,4,'#90734b')}
+}
+function drawPlatforms(){for(const a of platforms){rect(a.x,a.y,a.w,a.h,'#644c34');rect(a.x,a.y,a.w,5,'#a4c66a');rect(a.x,a.y+5,a.w,4,'#557443');for(let x=a.x+10;x<a.x+a.w;x+=24)rect(x,a.y+10,10,4,'#89694b')}}
+function slimeBounds(){return {x:slime.x,y:slime.y,w:slime.w,h:slime.h}}
+function drawSlime(){
+if(slime.state==='dead'){let k=Math.max(.02,1-slime.death/.48);c.save();c.translate(slime.x+slime.w/2,slime.y+slime.h);c.scale(1,k);c.translate(-(slime.x+slime.w/2),-(slime.y+slime.h));rect(slime.x+4,slime.y+slime.h-15,slime.w-8,15,'#559c61');rect(slime.x+10,slime.y+slime.h-23,slime.w-20,8,'#80cf83');c.restore();return}
+let x=slime.x,y=slime.y,w=slime.w,h=slime.h;
+c.fillStyle='#3b7949';c.beginPath();c.moveTo(x,y+h);c.lineTo(x+3,y+17);c.lineTo(x+12,y+7);c.lineTo(x+w/2,y);c.lineTo(x+w-12,y+7);c.lineTo(x+w-3,y+17);c.lineTo(x+w,y+h);c.closePath();c.fill();
+rect(x+7,y+13,w-14,h-14,'#69c779');rect(x+12,y+18,6,7,'#183d2b');rect(x+w-18,y+18,6,7,'#183d2b');
+// no mouth
+let bx=x-2,by=y+h+7,bw=w+4;rect(bx-1,by-1,bw+2,7,'#172c26');rect(bx,by,bw,5,'#513d3a');rect(bx,by,bw*clamp(slime.hp/100,0,1),5,'#e64b51');
+}
+function playerVisible(){return !(p.invuln>0&&Math.floor(clock/65)%2===0)}
+function drawPlayer(){
+if(!playerVisible())return;
+let x=0,y=p.y, crouch=keys.ArrowDown&&!attack&&!charge;
+let red=p.flash>0,white=red?'#f08080':'#fff',shade=red?'#bd5555':'#d9d9d9';
+let bob=p.ground&&Math.abs(p.vx)>.1?Math.sin(p.walkTime*.55)*1.5:0;
+let footY=G; // feet remain on the same floor line in both standing and crouching poses
+c.save();
+// Flip the sprite around its own width, not the world origin, so left-facing movement stays aligned.
+c.translate(p.x+(p.face<0?60:0),0);if(p.face<0)c.scale(-1,1);
+if(crouch){
+let top=footY-42;
+rect(x+10,top+14,34,20,white);rect(x+7,footY-10,19,10,shade);rect(x+28,footY-10,19,10,white);
+rect(x+10,top,34,27,white);rect(x+15,top+5,24,3,white);
+rect(x+18,top+11,3,3,'#111');rect(x+34,top+11,3,3,'#111');
+line(x+13,top+23,x+6,footY-12,shade,7);line(x+41,top+23,x+48,footY-12,white,7);
+}else{
+let top=y+bob;
+// legs, original simple stick-like silhouette
+let swing=p.ground?Math.sin(p.walkTime*.62)*4:2;
+line(x+20,top+49,x+17+swing,footY-1,white,9);line(x+36,top+49,x+38-swing,footY-1,white,9);
+line(x+17+swing,footY-1,x+10+swing,footY-1,shade,7);line(x+38-swing,footY-1,x+45-swing,footY-1,white,7);
+// slightly smaller torso
+rect(x+15,top+27,26,24,white);rect(x+15,top+33,4,15,shade);
+// rounded head
+rect(x+12,top+3,31,29,white);rect(x+16,top,23,5,white);rect(x+12,top+25,31,6,shade);
+rect(x+20,top+13,3,3,'#111');rect(x+34,top+13,3,3,'#111');
+if(attack||charge){
+let isCharging=!!charge;
+let a=attack?attack.progress:0;
+let type=attack?attack.type:4;
+let sx=x+38,sy=top+36;
+let angle,reach;
+if(isCharging){angle=-.35;reach=34}
+else if(type===1){angle=.45+1.2*a;reach=28}
+else if(type===2){angle=-1.45+1.2*a;reach=31}
+else if(type===3){angle=-.8+2.2*a;reach=42}
+else{angle=-.95+1.8*a;reach=50}
+let ex=sx+Math.cos(angle)*reach,ey=sy+Math.sin(angle)*reach;
+line(x+37,top+35,x+43,top+39,white,8);line(x+43,top+39,ex,ey,white,8);
+let bladeAngle=angle+(type===1?.65:type===2?-.65:0);
+// Keep the sword blade the same length for every attack; heavier hits use impact FX instead.
+let bladeLength=43;
+let tx=ex+Math.cos(bladeAngle)*bladeLength,ty=ey+Math.sin(bladeAngle)*bladeLength;
+// blade afterimages
+let trailCount=type===3||type===4?5:3;
+for(let i=trailCount;i>=1;i--){let k=i*.12;line(ex+Math.cos(bladeAngle)*bladeLength*k,ey+Math.sin(bladeAngle)*bladeLength*k,tx+Math.cos(bladeAngle)*bladeLength*k,ty+Math.sin(bladeAngle)*bladeLength*k,'rgba(180,225,245,'+(0.10+i*.035)+')',type>=3?6:3)}
+line(ex,ey,tx,ty,'#a9d8ed',type>=3?8:6);line(ex,ey,tx,ty,'#f5fcff',3);line(ex-5,ey+4,ex+5,ey-4,'#765438',4);
+if(type===3||type===4){
+let glow=type===4?'#d5f4ff':'#c4e8fa';
+line(tx-7,ty-7,tx+7,ty+7,glow,4);line(tx-7,ty+7,tx+7,ty-7,glow,4);
+if(type===3){
+// Broader slash arc and impact sparks make the third hit feel heavier without lengthening the sword.
+c.save();c.globalAlpha=.72;c.strokeStyle='#d9f2ff';c.lineWidth=5;c.beginPath();
+c.arc(sx+5,sy+2,58,-.95+a*1.9,-.45+a*1.9);c.stroke();c.globalAlpha=.38;c.lineWidth=10;c.strokeStyle='#8fd4f0';c.beginPath();
+c.arc(sx+5,sy+2,64,-.9+a*1.9,-.42+a*1.9);c.stroke();c.restore();
+}
+}
+if(isCharging){
+let pulse=.5+.5*Math.sin(clock/90);c.save();c.globalAlpha=.25+.18*pulse;c.strokeStyle='#bdeeff';c.lineWidth=2;c.beginPath();c.arc(x+29,top+36,18+3*pulse,0,Math.PI*2);c.stroke();c.restore();
+}
+}else{
+line(x+15,top+35,x+9,top+48,shade,8);line(x+39,top+35,x+46,top+47,white,8);
+line(x+46,top+46,x+59,top+27,'#a9d8ed',5);line(x+46,top+46,x+59,top+27,'#f5fcff',2);line(x+41,top+43,x+50,top+49,'#765438',4);
+}
+}
+c.restore();
+}
+function emit(x,y,color,n){for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=1+Math.random()*3;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1,life:24,size:3+Math.random()*3,color})}}
+function drawEffects(){
+for(let g of ghosts){c.globalAlpha=g.life/g.max*.25;rect(g.x,g.y,g.w,g.h,'#e5f6ff')}c.globalAlpha=1;
+for(let a of particles){c.globalAlpha=clamp(a.life/24,0,1);rect(a.x,a.y,a.size,a.size,a.color)}c.globalAlpha=1;
+for(let a of goldText){c.globalAlpha=clamp(a.life/.8,0,1);c.fillStyle='#ffe27a';c.font='bold 13px system-ui';c.fillText('+10 G',a.x,a.y)}c.globalAlpha=1;
+}
+function draw(){c.clearRect(0,0,W,H);background();terrain();drawPlatforms();drawSlime();drawEffects();drawPlayer()}
+function ui(){
+$('hpfill').style.width=p.hp+'%';$('hptext').textContent=p.hp+'/100';
+$('enemytext').textContent=slime.state==='alive'?`SLIME ${slime.hp}/100`:slime.state==='dead'?'SLIME DEFEATED':slime.state==='waiting'?'SLIME RESPAWNING':'SLIME APPEARING';
+for(let i=1;i<=3;i++)$('m'+i).classList.toggle('active',combo===i);
+$('mz').classList.toggle('active',!!charge);$('md').classList.toggle('active',!!attack&&attack.type===5);
+}
+function spawnSlime(){slime={x:625,y:G-42,w:48,h:42,hp:100,state:'alive',death:0,wait:0,spawn:0,knock:0}}
+function reward(){
+goldText.push({x:slime.x+5,y:slime.y-8,life:.8});
+}
+function damageSlime(dmg,range,knock=0){
+if(slime.state!=='alive')return;
+let b=slimeBounds(),dx=(b.x+b.w/2)-(p.x+p.w/2);
+let forward=dx*p.face;
+let vertical=p.y+p.h>b.y+3&&p.y<b.y+b.h+5;
+if(forward>-18&&forward<range&&vertical){
+slime.hp=Math.max(0,slime.hp-dmg);
+slime.knock=Math.sign(dx||p.face)*knock;
+emit(b.x+b.w/2,b.y+20,dmg>=20?'#b8f0cb':'#91dca0',dmg>=30?13:7);
+if(slime.hp<=0){slime.state='dead';slime.death=0;emit(b.x+b.w/2,b.y+b.h/2,'#9be5a1',17);reward()}
+}
+}
+function attackStart(){
+if(gameOver||cool>0||p.hp<=0||keys.ArrowDown||keys.ArrowUp||charge)return;
+if(comboTimer<=0)combo=0;combo=combo%3+1;
+let type=combo;attack={type,age:0,progress:0,duration:type===3?.22:.17};
+cool=type===3?.5:.3;comboTimer=.5;
+damageSlime(type===3?20:10,type===3?145:115,type===3?5:3);
+ui();
+}
+function startCharge(){
+if(gameOver||charge||cool>0||dashCool>0)return;
+if(keys.ArrowDown){dashAttack();return}
+if(attack||p.crouch||p.lookUp)return;
+p.vx=0;p.knockback=0;charge={time:0};
+}
+function releaseCharge(){
+if(!charge)return;
+if(charge.time>=1){
+attack={type:4,age:0,progress:0,duration:.32};
+cool=.7;damageSlime(30,190,9);
+$('status').textContent='CHARGED SLASH!';
+}else{$('status').textContent='CHARGE CANCELLED'}
+charge=null;ui();
+}
+function dashAttack(){
+if(gameOver||dashCool>0||p.hp<=0)return;
+charge=null;attack={type:5,age:0,progress:0,duration:.24};dashCool=.5;cool=.15;
+// Brief invulnerability window while the dash slash is active.
+p.invuln=Math.max(p.invuln,.22);
+let dir=p.face;p.x=clamp(p.x+dir*55,0,W-p.w);
+damageSlime(20,155,7);
+$('status').textContent='DASH SLASH!';
+ui();
+}
+function jump(){if(p.ground&&!keys.ArrowDown&&!gameOver){p.vy=-10.5;p.ground=false}}
+function hurt(){
+if(p.invuln>0||gameOver)return;
+p.hp=Math.max(0,p.hp-10);p.invuln=1;p.flash=.2;p.knockback=-p.face*3;
+$('status').textContent='-10 HP';
+if(p.hp<=0){gameOver=true;$('status').textContent='GAME OVER — 다시 시작을 눌러주세요'}
+ui();
+}
+function reset(){
+p={x:310,y:G-72,w:54,h:72,vx:0,vy:0,face:1,ground:true,hp:100,invuln:0,flash:0,knockback:0,walkTime:0};
+spawnSlime();keys={};attack=null;combo=0;comboTimer=0;cool=0;charge=null;dashCool=0;
+particles=[];ghosts=[];goldText=[];clock=0;gameOver=false;$('status').textContent='SLIME BATTLE';ui();draw();
+}
+function update(dt){
+let sec=dt/60;clock+=dt*16.67;
+if(!gameOver){
+let crouch=!!keys.ArrowDown;
+let dir=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0);
+if(crouch||keys.ArrowUp||attack||charge)p.vx=0;
+else{p.vx=dir*3.5;if(dir)p.face=dir}
+if(p.knockback&&!charge){p.x+=p.knockback*dt;p.knockback*=Math.pow(.8,dt)}else if(charge){p.knockback=0}
+p.x=clamp(p.x+p.vx*dt,0,W-p.w);
+let old=p.y;p.vy=Math.min(12,p.vy+.48*dt);p.y+=p.vy*dt;p.ground=false;
+if(p.y+p.h>=G&&p.vy>=0){p.y=G-p.h;p.vy=0;p.ground=true}
+for(let a of platforms){if(p.vy>=0&&old+p.h<=a.y+2&&p.y+p.h>=a.y&&p.x+p.w>a.x&&p.x<a.x+a.w){p.y=a.y-p.h;p.vy=0;p.ground=true}}
+if(p.ground&&Math.abs(p.vx)>.1&&!charge)p.walkTime+=dt*.45;
+p.invuln=Math.max(0,p.invuln-sec);p.flash=Math.max(0,p.flash-sec);
+cool=Math.max(0,cool-sec);dashCool=Math.max(0,dashCool-sec);comboTimer=Math.max(0,comboTimer-sec);
+if(comboTimer<=0)combo=0;
+if(attack){attack.age+=sec;attack.progress=clamp(attack.age/attack.duration,0,1);if(attack.progress>=1)attack=null}
+if(charge){charge.time+=sec;if(charge.time>=1){/* remains charged until Z release */}}
+if(slime.state==='alive'){
+let dx=(p.x+p.w/2)-(slime.x+slime.w/2);
+if(Math.abs(dx)>3)slime.x+=Math.sign(dx)*1.05*dt;
+slime.x+=slime.knock*dt;slime.knock*=Math.pow(.88,dt);slime.x=clamp(slime.x,0,W-slime.w);slime.y=G-slime.h;
+let touching=p.x+p.w>slime.x+5&&p.x<slime.x+slime.w-5&&p.y+p.h>slime.y+8&&p.y<slime.y+slime.h;
+if(touching)hurt();
+}else if(slime.state==='dead'){slime.death+=sec;if(slime.death>=.48){slime.state='waiting';slime.wait=0}}
+else if(slime.state==='waiting'){slime.wait+=sec;if(slime.wait>=3){slime.state='spawning';slime.spawn=0;emit(slime.x+24,G-12,'#8bdb92',10)}}
+else if(slime.state==='spawning'){slime.spawn+=sec;if(slime.spawn>=.4)spawnSlime()}
+}
+particles.forEach(a=>{a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=.15*dt;a.life-=dt});particles=particles.filter(a=>a.life>0);
+goldText.forEach(a=>{a.y-=.45*dt;a.life-=sec});goldText=goldText.filter(a=>a.life>0);
+ghosts.forEach(a=>a.life-=sec);ghosts=ghosts.filter(a=>a.life>0);
+ui();
+}
+function frame(t){
+let dt=Math.min((t-last)/16.67,2);last=t;
+if(attack&&Math.random()<.8)ghosts.push({x:p.x-5,y:p.y+8,w:64,h:65,life:.13,max:.13});
+update(dt);draw();raf=requestAnimationFrame(frame);
+}
+function keydown(e){
+if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();
+if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))keys[e.key]=true;
+if(e.key.toLowerCase()==='c'&&!e.repeat)jump();
+if(e.key.toLowerCase()==='x'&&!e.repeat)attackStart();
+if(e.key.toLowerCase()==='z'&&!e.repeat)startCharge();
+}
+function keyup(e){
+keys[e.key]=false;
+if(e.key.toLowerCase()==='z')releaseCharge();
+}
+window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('blur',()=>{keys={};releaseCharge()});
+function bindButton(el,key,action){
+el.addEventListener('pointerdown',e=>{e.preventDefault();if(action){action();return}keys[key]=true;el.setPointerCapture(e.pointerId)});
+['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,()=>{keys[key]=false}));
+}
+document.querySelectorAll('[data-key]').forEach(el=>bindButton(el,el.dataset.key));
+document.querySelectorAll('[data-action]').forEach(el=>{
+let action=el.dataset.action;
+bindButton(el,null,action==='jump'?jump:action==='attack'?attackStart:startCharge);
+if(action==='charge')el.addEventListener('pointerup',releaseCharge);
+});
+$('reset').addEventListener('click',reset);
+reset();last=performance.now();raf=requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
